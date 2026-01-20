@@ -20,7 +20,3 @@ tokio = { version = "1.49.0", features = ["full"] }
 [[bin]]
 name = "cranbrook-catering-api"
 path = "src/main.rs"
-
-[[bin]]
-name = "test_pdf"
-path = "test_pdf.rs"
