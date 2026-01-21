@@ -1,11 +1,12 @@
 use axum::{Router, extract::Query, http::StatusCode, response::IntoResponse, routing::get};
 use chrono::{Datelike, NaiveDate};
-use reqwest::blocking::Client;
 use reqwest::Url;
+use reqwest::blocking::Client;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use tower_http::cors::{Any, CorsLayer};
 
 type MenuIndex = Arc<Mutex<HashMap<String, String>>>;
 
@@ -33,7 +34,7 @@ async fn get_meal(
                 StatusCode::BAD_REQUEST,
                 "Invalid date format. Use YYYY-MM-DD or YYYY/MM/DD.",
             )
-                .into_response()
+                .into_response();
         }
     };
     let period = &params.period.to_lowercase();
@@ -98,11 +99,11 @@ fn parse_week_commencing(text: &str) -> Option<NaiveDate> {
     // Parse "Menu for w/c Monday 26th January 2026" format
     let re = regex::Regex::new(r"w/c\s+\w+\s+(\d+)(?:st|nd|rd|th)?\s+(\w+)\s+(\d{4})").ok()?;
     let caps = re.captures(text)?;
-    
+
     let day = caps.get(1)?.as_str().parse::<u32>().ok()?;
     let month_str = caps.get(2)?.as_str();
     let year = caps.get(3)?.as_str().parse::<i32>().ok()?;
-    
+
     let month = match month_str.to_lowercase().as_str() {
         "january" => 1,
         "february" => 2,
@@ -118,7 +119,7 @@ fn parse_week_commencing(text: &str) -> Option<NaiveDate> {
         "december" => 12,
         _ => return None,
     };
-    
+
     NaiveDate::from_ymd_opt(year, month, day)
 }
 
@@ -167,7 +168,8 @@ fn split_blocks(lines: &[String], expected_blocks: usize) -> Vec<Vec<String>> {
         if is_junk_line(trimmed, &lower) {
             continue;
         }
-        let starts_new = raw.starts_with(' ') && !blocks.is_empty() && blocks.len() < expected_blocks;
+        let starts_new =
+            raw.starts_with(' ') && !blocks.is_empty() && blocks.len() < expected_blocks;
         if starts_new {
             blocks.push(Vec::new());
         }
@@ -212,7 +214,7 @@ fn parse_weekly_menu(text: &str, week_start: NaiveDate) -> HashMap<String, Strin
     // The PDF has a table structure where days are columns
     // We need to track which section (breakfast/brunch/lunch/dinner) we're in
     // and parse the first non-empty item for each day in that section
-    
+
     let mut in_breakfast = false;
     let mut in_brunch_sat = false;
     let mut in_brunch_sun = false;
@@ -228,13 +230,13 @@ fn parse_weekly_menu(text: &str, week_start: NaiveDate) -> HashMap<String, Strin
     for line in lines {
         let trimmed = line.trim();
         let lower = trimmed.to_lowercase();
-        
+
         // Detect section headers - look for lines with multiple instances of the period name
         let breakfast_count = lower.matches("breakfast").count();
         let brunch_count = lower.matches("brunch").count();
         let lunch_count = lower.matches("lunch").count();
         let dinner_count = lower.matches("dinner").count();
-        
+
         if breakfast_count >= 3 {
             in_breakfast = true;
             in_brunch_sat = false;
@@ -278,12 +280,12 @@ fn parse_weekly_menu(text: &str, week_start: NaiveDate) -> HashMap<String, Strin
         } else if in_dinner {
             dinner_lines.push(line.to_string());
         }
-        
+
         // Skip empty lines and lines with common filler text
         if is_junk_line(trimmed, &lower) {
             continue;
         }
-        
+
         // Extract first meal for each day in current section
         if in_breakfast {
             for day in 0..5 {
@@ -345,11 +347,11 @@ fn build_index() -> anyhow::Result<HashMap<String, String>> {
     for (link, week_start_opt) in links {
         println!("Processing {link}");
         let text = download_and_extract_text(&client, &link)?;
-        
+
         if let Some(week_start) = week_start_opt {
             println!("Week starting: {}", week_start);
             let week_menus = parse_weekly_menu(&text, week_start);
-            
+
             for (k, v) in week_menus {
                 println!("Storing key: {} -> {}", k, v);
                 index.insert(k, v);
@@ -360,7 +362,10 @@ fn build_index() -> anyhow::Result<HashMap<String, String>> {
     }
 
     println!("\nTotal entries in index: {}", index.len());
-    println!("Sample keys: {:?}", index.keys().take(5).collect::<Vec<_>>());
+    println!(
+        "Sample keys: {:?}",
+        index.keys().take(5).collect::<Vec<_>>()
+    );
 
     Ok(index)
 }
@@ -374,7 +379,8 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/meal", get(get_meal))
-        .layer(axum::extract::Extension(shared_index));
+        .layer(axum::extract::Extension(shared_index))
+        .layer(CorsLayer::new().allow_origin(Any).allow_methods(Any));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
     println!("Listening on http://127.0.0.1:3000");
